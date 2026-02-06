@@ -56,3 +56,20 @@ class Config:
     
     # 模型名称: 建议使用 deepseek-chat (V3) 进行快速分析
     LLM_MODEL_NAME = "deepseek-chat" 
+    
+    # 4. 套利与风控参数 (参考来源 [1])
+    # 总摩擦成本：0.3% (现货 Taker 0.1%*2 + 合约 Taker 0.05%*2)
+    ARBITRAGE_FEE_RATE = 0.003 
+    # 资金费率年化阈值 (低于此值不建议套利)
+    MIN_APR_THRESHOLD = 0.10  # 10%
+    
+      # 5. AI 分析指令 (强制结构化输出)
+    SENTIMENT_PROMPT = """
+    你是一名专业的加密货币量化分析师。请根据提供的新闻和市场数据进行分析。
+    请严格按照以下 JSON 格式输出，不要包含 Markdown 格式或其他废话：
+    {
+        "sentiment_score": <float, -1.0 到 1.0>,
+        "market_character": "<string, 例如: 极度恐慌 / 震荡洗盘 / 情绪高涨 / 缩量阴跌>",
+        "reasoning": "<string, 简要说明评分理由，不超过50字>"
+    }
+    """

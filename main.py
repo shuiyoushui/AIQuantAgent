@@ -72,53 +72,6 @@ class AIQuantAgent:
             self.analyze_single_asset(coin)
             time.sleep(1)
     
-    # 日志系统
-    # 1. 初始化日志系统
-    sys_logger = SystemLogger()
-
-    def run_cycle(self):
-        print(f"\n======== ⏰ 巡航开始: {datetime.now()} ========")
-    
-        for coin in Config.TARGET_COINS:
-            # A. 生成本次分析的唯一 ID
-            session_id = sys_logger.start_session()
-        
-        # --- 第一步：获取数据 ---
-            df = self.loader.get_market_data(coin)
-            news, _ = self.loader.fetch_news_context(coin)
-        
-        # 【记录点 1】行情数据落盘
-            latest_market = df.iloc[-1].to_dict()
-        # 假设您计算了简单的指标
-            indicators = {'rsi': calculate_rsi(df), 'trend': 'up'} 
-            sys_logger.log_market(session_id, coin, latest_market, indicators)
-
-        # --- 第二步：AI 分析 ---
-        # 注意：需要修改 signal_generator 让他返回 raw_response
-            ai_signal, raw_response_text = self.brain.analyze(news, latest_market)
-        
-        # 【记录点 2】AI 思考落盘 (这是最宝贵的调试资料)
-            sys_logger.log_ai_thought(
-                session_id, 
-                coin, 
-                news, 
-            "这是Prompt占位符", 
-                raw_response_text, # 包含 DeepSeek 的 <think> 过程
-                ai_signal
-        )
-
-        # --- 第三步：策略执行 ---
-            decision = self.strategy.parse_signal(ai_signal, latest_market['close'])
-        
-        # 【记录点 3】策略结果落盘
-            sys_logger.log_signal(
-                session_id, 
-                coin, 
-                ai_signal.get('sentiment_score'), 
-                decision
-            )
-        
-            self.strategy.execute(decision)
 
 import argparse
 

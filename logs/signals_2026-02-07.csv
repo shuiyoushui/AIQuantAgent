@@ -1,1 +1,5 @@
 session_id,timestamp,symbol,ai_score,action,exec_price,risk_passed,reason
+70cb5d1f-a28a-479b-b52b-c89faec13c8d,2026-02-07T02:32:41.866437,BNB,-0.6,SELL,650.9,True,AI低分(-0.6) + 趋势向下
+6270d025-f08b-4af6-9996-a645efad51e4,2026-02-07T02:35:32.801413,BNB,-0.6,SELL,0,True,看跌: 情绪分 -0.6 < -0.6
+8ff614e5-aaa5-406e-b03f-e56c00a412f6,2026-02-07T02:36:24.827849,OKB,-0.6,SELL,0,True,看跌: 情绪分 -0.6 < -0.6
+7a543db3-2942-4aa8-bd9a-73050f5f9f0e,2026-02-07T02:51:56.478932,OKB,-0.6,SELL,0,True,看跌: 情绪分 -0.6 < -0.6
