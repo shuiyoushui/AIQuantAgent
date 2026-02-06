@@ -1,0 +1,26 @@
+#这个文件定义了如何使用 AI 的分数。例如，分数达到多少才买入？结合什么技术指标？
+# 策略逻辑配置
+strategy_name: "Event_Driven_Trend_Following"
+
+entry_rules:
+  # 只有当 AI 情绪分高于此阈值时才考虑做多
+  long_threshold: 0.6  
+  # 只有当 AI 情绪分低于此阈值时才考虑做空
+  short_threshold: -0.6
+  # 置信度过滤器：AI 必须要有把握
+  min_confidence: 0.8
+
+technical_filter:
+  # 技术指标过滤器 (防止接飞刀)
+  # 如果做多，当前价格必须在 MA20 之上
+  enable_ma_filter: true 
+  ma_period: 20
+
+position_sizing:
+  # 每次交易使用的资金比例
+  risk_per_trade: 0.02  # 2%
+  max_leverage: 1       # 不加杠杆
+
+risk_management:
+  stop_loss_pct: 0.05   # 5% 止损
+  take_profit_pct: 0.10 # 10% 止盈

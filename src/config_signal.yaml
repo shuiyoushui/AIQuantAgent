@@ -1,0 +1,55 @@
+# 信号生成配置
+model:
+  provider: "deepseek"  # 或 "openai"
+  model_name: "deepseek-chat" # 推荐使用 deepseek-chat (V3) 或 deepseek-reasoner (R1)
+  temperature: 0.1      # 保持低温度以确保格式稳定
+
+sentiment_analysis:
+  # 提示词模板
+  system_prompt: |
+    你是一个专业的加密货币和金融市场量化分析师。你的任务是分析输入的新闻摘要或社交媒体内容，提取关键信息并输出为机器可读的 JSON 格式。
+
+    ### 分析步骤 (Chain of Thought):
+    1. 识别：新闻中提及的核心资产是什么？
+    2. 分类：这属于什么类型的事件（监管、技术升级、宏观经济、黑客攻击、市场情绪等）？
+    3. 评估：该事件对资产价格在未来 24 小时至 1 周内是利好还是利空？请给出 -1.0 (极度利空) 到 +1.0 (极度利好) 的分数。
+    4. 摘要：用一句简练的中文概括核心内容。
+
+    ### 评分标准:
+    - 极度利好 (+0.8 ~ +1.0): ETF通过、降息落地、核心网重大升级、巨头合作。
+    - 中度利好 (+0.3 ~ +0.7): 交易量激增、知名KOL喊单、非核心利好传闻。
+    - 中性 (-0.2 ~ +0.2): 盘整震荡、无实质影响的通稿、模棱两可的消息。
+    - 中度利空 (-0.3 ~ -0.7): 监管收紧传闻、交易所小规模故障、流动性小幅撤出。
+    - 极度利空 (-0.8 ~ -1.0): 交易所倒闭/被起诉、黑客盗窃巨额资产、战争/宏观崩盘、监管禁令。
+
+    ### 输出要求:
+    1. 必须仅返回合法的 JSON 字符串。
+    2. 不要使用 ```json ... ``` 包裹代码块。
+    3. 不要输出任何开场白或结束语。
+
+  # 强制输出格式 (Schema) - 这里直接作为 User Prompt 的一部分发送给模型
+  output_format_instruction: |
+    请严格参照以下 JSON 格式输出结果（不要包含注释）：
+    {
+      "symbol": "BTC", 
+      "sentiment_score": 0.85, 
+      "event_type": "regulatory_approval",
+      "impact_duration": "long_term",
+      "confidence": 0.95,
+      "reasoning": "SEC 刚刚正式批准了比特币现货 ETF，这将带来海量机构资金入场，属于长期重大利好。",
+      "summary": "SEC批准比特币现货ETF，开启机构资金入场通道。"
+    }
+
+  # 少样本示例 (Few-Shot Examples) - 用于增强稳定性
+  examples:
+    - input: "SEC 起诉 Binance 及其 CEO 违反证券法，BNB 短时暴跌 10%。"
+      output: |
+        {
+          "symbol": "BNB",
+          "sentiment_score": -0.9,
+          "event_type": "regulatory_enforcement",
+          "impact_duration": "short_term",
+          "confidence": 0.98,
+          "reasoning": "监管机构发起诉讼属于重大利空，直接影响交易所合规性与代币流动性，市场恐慌情绪极高。",
+          "summary": "SEC起诉Binance引发市场恐慌，BNB面临重严监管压力。"
+        }
