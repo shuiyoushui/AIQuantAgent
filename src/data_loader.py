@@ -1,3 +1,9 @@
+"""
+数据加载器（备用/兼容层）。
+
+职责：从交易所、yfinance、RSS 等拉取并组装市场与新闻数据，提供统一接口；
+若项目以 DataIngestion 为主数据源，本模块可作为备用或测试用。
+"""
 import ccxt
 import yfinance as yf
 import pandas as pd

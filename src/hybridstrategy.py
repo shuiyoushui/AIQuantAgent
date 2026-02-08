@@ -1,4 +1,9 @@
-#将 AI 的“主观判断”与 交易所的“客观数据”结合。
+"""
+混合策略模块：新闻情绪 + 交易所价格。
+
+职责：结合新闻/舆情与交易所 ticker 做多空判断（如情绪与涨跌共振才发强信号）；
+接口为 run_analysis(symbol)。主流程通过 strategy_adapters.HybridStrategyAdapter 接入时可启用。
+"""
 import ccxt
 import pandas as pd
 import time

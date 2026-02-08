@@ -1,26 +1,69 @@
-#这个文件定义了如何使用 AI 的分数。例如，分数达到多少才买入？结合什么技术指标？
-# 策略逻辑配置
+# 策略逻辑配置：谁启用、谁注释掉，以及各策略参数
+# strategies: 列表里 enabled: true 的会被使用（取第一个）；enabled: false 即「注释掉」该策略
+strategies:
+  - id: event_driven
+    enabled: true
+    name: "事件驱动趋势跟踪"
+  - id: rsi
+    enabled: false
+    name: "RSI 超买超卖"
+  - id: hybrid
+    enabled: false
+    name: "混合新闻+价格"
+
+# ---------- event_driven 策略参数 ----------
+event_driven:
+  strategy_name: "Event_Driven_Trend_Following"
+  entry_rules:
+    long_threshold: 0.6
+    short_threshold: -0.6
+    min_confidence: 0.8
+  technical_filter:
+    enable_ma_filter: true
+    ma_period: 20
+  position_sizing:
+    risk_per_trade: 0.02
+    max_leverage: 1
+  risk_management:
+    stop_loss_pct: 0.05
+    take_profit_pct: 0.10
+
+# ---------- rsi 策略参数 ----------
+rsi:
+  rsi_period: 14
+  oversold: 30
+  overbought: 70
+  position_sizing:
+    risk_per_trade: 0.02
+    max_leverage: 1
+  risk_management:
+    stop_loss_pct: 0.05
+    take_profit_pct: 0.10
+
+# ---------- hybrid 策略参数 ----------
+hybrid:
+  sentiment_long_threshold: 0.5
+  sentiment_short_threshold: -0.5
+  min_confidence: 0.7
+  position_sizing:
+    risk_per_trade: 0.02
+    max_leverage: 1
+  risk_management:
+    stop_loss_pct: 0.05
+    take_profit_pct: 0.10
+
+# 兼容旧版：顶层保留一份 event_driven 同构，供未读 event_driven 键的代码使用
 strategy_name: "Event_Driven_Trend_Following"
-
 entry_rules:
-  # 只有当 AI 情绪分高于此阈值时才考虑做多
-  long_threshold: 0.6  
-  # 只有当 AI 情绪分低于此阈值时才考虑做空
+  long_threshold: 0.6
   short_threshold: -0.6
-  # 置信度过滤器：AI 必须要有把握
   min_confidence: 0.8
-
 technical_filter:
-  # 技术指标过滤器 (防止接飞刀)
-  # 如果做多，当前价格必须在 MA20 之上
-  enable_ma_filter: true 
+  enable_ma_filter: true
   ma_period: 20
-
 position_sizing:
-  # 每次交易使用的资金比例
-  risk_per_trade: 0.02  # 2%
-  max_leverage: 1       # 不加杠杆
-
+  risk_per_trade: 0.02
+  max_leverage: 1
 risk_management:
-  stop_loss_pct: 0.05   # 5% 止损
-  take_profit_pct: 0.10 # 10% 止盈
+  stop_loss_pct: 0.05
+  take_profit_pct: 0.10

@@ -1,9 +1,15 @@
+"""
+信号生成模块（AI 分析层）。
+
+职责：调用大模型对新闻/舆情做情感与事件分析，产出 sentiment_score、confidence、
+reason 等字段，供策略引擎生成交易决策。配置见 config_signal.yaml。
+"""
 import yaml
 import json
 import re
 from openai import OpenAI
 from .config import Config
-from .data_loader import DataLoader
+
 
 class SignalGenerator:
     def __init__(self, config_path="src/config_signal.yaml", logger=None):
@@ -16,7 +22,6 @@ class SignalGenerator:
             raise
 
         self.logger = logger
-        self.loader = DataLoader(logger=logger)
         
         # 2. 初始化客户端
         api_key = Config.DEEPSEEK_API_KEY or Config.OPENAI_API_KEY
@@ -40,18 +45,39 @@ class SignalGenerator:
             
         return f"{instruction}{symbol_emphasis}\n\n### 参考示例:\n{examples_str}\n\n### 待分析新闻:\n{news_text}"
 
-    def analyze_market_sentiment(self, symbol="BTC"):
-        """获取新闻 -> 调用LLM -> 返回结构化信号"""
-        # 1. 获取新闻
-        raw_news, source_status = self.loader.fetch_news_context(symbol)
+    def analyze_market_sentiment(self, symbol="BTC", cleaned_news_list=None):
+        """
+        分析市场情绪
         
-        if len(raw_news) < 10 or "暂无" in raw_news:
+        Args:
+            symbol: 交易对符号
+            cleaned_news_list: 清洗后的新闻列表（来自 DataProcessor）
+            
+        Returns:
+            结构化信号字典
+        """
+        # 1. 处理新闻数据
+        if not cleaned_news_list:
+            print(f"   ⚠️ {symbol} 新闻数据为空，跳过 AI 分析")
+            return None
+        
+        # 将新闻列表转换为文本格式
+        news_text_parts = []
+        for news in cleaned_news_list:
+            source = news.get('source', 'unknown')
+            title = news.get('title', '')
+            content = news.get('cleaned_content', title)
+            news_text_parts.append(f"[{source.upper()}] {content}")
+        
+        news_text = "\n".join(news_text_parts)
+        
+        if len(news_text) < 10:
             print(f"   ⚠️ {symbol} 新闻数据不足，跳过 AI 分析")
             return None
             
         # 2. 构建 Prompt（传入 symbol 以确保 AI 知道正在分析哪个币）
         system_prompt = self.config['sentiment_analysis']['system_prompt']
-        user_prompt = self._construct_prompt(raw_news, symbol)
+        user_prompt = self._construct_prompt(news_text, symbol)
         
         print(f"   🧠 [AI 分析师] 正在阅读 {symbol} 的新闻并思考...")
         
@@ -85,7 +111,12 @@ class SignalGenerator:
             signal_data = json.loads(clean_json)
             
             signal_data['symbol'] = symbol
-            signal_data['source_status'] = source_status
+            # 统计数据源状态
+            sources = {}
+            for news in cleaned_news_list:
+                source = news.get('source', 'unknown')
+                sources[source] = sources.get(source, 0) + 1
+            signal_data['source_status'] = sources
             
             # 5. 记录 AI 观点日志
             if self.logger:

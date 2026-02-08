@@ -1,3 +1,10 @@
+"""
+策略引擎模块（事件驱动趋势跟踪）。
+
+职责：根据 AI 情绪分与置信度、技术指标（MA/RSI）过滤，生成多空决策；
+计算仓位、止损止盈；提供 generate_trade_decision / execute 供主流程调用。
+配置来自 config_strategy.yaml，在策略注册表中以 strategy_id=event_driven 使用。
+"""
 import ccxt
 import time
 import os
@@ -21,11 +28,21 @@ class StrategyEngine:
         self.exchange = None
         self.config = None
         
-        # 加载策略配置文件
+        # 加载策略配置文件；优先使用 event_driven 段落，否则回退到顶层键
         if config_path and os.path.exists(config_path):
             try:
                 with open(config_path, 'r', encoding='utf-8') as f:
-                    self.config = yaml.safe_load(f)
+                    raw = yaml.safe_load(f)
+                self.config = raw.get("event_driven")
+                if not self.config or not isinstance(self.config, dict):
+                    self.config = {
+                        k: raw[k] for k in (
+                            "strategy_name", "entry_rules", "technical_filter",
+                            "position_sizing", "risk_management"
+                        ) if raw.get(k) is not None
+                    } or self._get_default_config()
+                if not self.config:
+                    self.config = self._get_default_config()
                 print(f"   ⚙️ [策略] 已加载策略配置: {self.config.get('strategy_name', 'Unknown')}")
             except Exception as e:
                 print(f"   ⚠️ [策略] 配置文件加载失败: {e}，使用默认配置")
@@ -73,29 +90,25 @@ class StrategyEngine:
         rsi = 100 - (100 / (1 + rs))
         return rsi
 
-    def _calculate_technical_indicators(self, market_data, loader):
+    def _calculate_technical_indicators(self, market_df, ingestion=None):
         """
         计算技术指标（使用真实数据源）
-        返回包含技术指标的字典
+        
+        Args:
+            market_df: 清洗后的市场数据 DataFrame
+            ingestion: 数据采集器（可选，用于获取额外数据）
+            
+        Returns:
+            包含技术指标的字典
         """
         indicators = {}
         
-        if not market_data or not loader or not loader.exchange:
+        if market_df is None or len(market_df) == 0:
             return indicators
         
         try:
-            symbol = market_data.get('symbol', 'BTC')
-            base_coin = loader._normalize_symbol(symbol)
-            target_symbol = f"{base_coin}/USDT:USDT"
-            
-            # 获取 K 线数据（用于计算技术指标）
-            ohlcv = loader.exchange.fetch_ohlcv(target_symbol, timeframe='1h', limit=100)
-            if not ohlcv:
-                return indicators
-            
-            # 转换为 DataFrame
-            df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+            # 直接使用传入的 DataFrame
+            df = market_df.copy()
             
             # 计算移动平均线（MA）- 使用 pandas 原生方法
             ma_period = self.config['technical_filter'].get('ma_period', 20)
@@ -105,14 +118,18 @@ class StrategyEngine:
             current_price = df['close'].iloc[-1]
             current_ma = df['ma'].iloc[-1]
             
-            indicators['current_price'] = current_price
-            indicators['ma'] = current_ma
-            indicators['ma_period'] = ma_period
-            indicators['price_above_ma'] = current_price > current_ma if pd.notna(current_ma) else None
+            indicators['current_price'] = float(current_price) if pd.notna(current_price) else None
+            indicators['ma'] = float(current_ma) if pd.notna(current_ma) else None
+            indicators['ma_period'] = int(ma_period)
+            indicators['price_above_ma'] = bool(current_price > current_ma) if pd.notna(current_ma) else None
             
             # 计算 RSI（使用自定义函数）
             df['rsi'] = self._calculate_rsi(df['close'], period=14)
-            indicators['rsi'] = df['rsi'].iloc[-1]
+            rsi_value = df['rsi'].iloc[-1]
+            indicators['rsi'] = float(rsi_value) if pd.notna(rsi_value) else None
+            
+            if self.logger:
+                print(f"   ✅ [技术指标] 计算完成: MA{ma_period}={current_ma:.2f}, RSI={indicators['rsi']:.2f}")
             
         except Exception as e:
             if self.logger:
@@ -169,10 +186,18 @@ class StrategyEngine:
         quantity = risk_amount / (price * stop_loss_pct)
         return round(quantity, 6)
 
-    def generate_trade_decision(self, ai_signal, market_data=None, loader=None):
+    def generate_trade_decision(self, ai_signal, market_df=None, ticker_data=None, ingestion=None):
         """
-        输入: AI 分析结果 (包含 sentiment_score) 和 市场数据
-        输出: 具体的买卖指令 (Decision)
+        生成交易决策
+        
+        Args:
+            ai_signal: AI 分析结果 (包含 sentiment_score)
+            market_df: 清洗后的市场数据 DataFrame
+            ticker_data: 当前 ticker 数据（包含现货和合约价格）
+            ingestion: 数据采集器（用于获取额外数据）
+            
+        Returns:
+            具体的买卖指令 (Decision)
         """
         symbol = ai_signal.get('symbol', 'UNKNOWN') if ai_signal else 'UNKNOWN'
         
@@ -187,12 +212,15 @@ class StrategyEngine:
             "filters_passed": []
         }
         
-        # 从市场数据中提取价格
-        if market_data:
-            if 'spot' in market_data and 'price' in market_data['spot']:
-                decision["price"] = market_data['spot']['price']
-            elif 'swap' in market_data and 'price' in market_data['swap']:
-                decision["price"] = market_data['swap']['price']
+        # 从 ticker 数据中提取价格
+        if ticker_data:
+            if 'spot' in ticker_data and 'price' in ticker_data['spot']:
+                decision["price"] = ticker_data['spot']['price']
+            elif 'swap' in ticker_data and 'price' in ticker_data['swap']:
+                decision["price"] = ticker_data['swap']['price']
+        elif market_df is not None and len(market_df) > 0:
+            # 如果没有 ticker 数据，使用 DataFrame 的最后一根 K 线收盘价
+            decision["price"] = market_df.iloc[-1]['close']
 
         if not ai_signal or 'sentiment_score' not in ai_signal:
             decision["reason"] = "数据无效: 缺失 AI 信号"
@@ -248,7 +276,7 @@ class StrategyEngine:
         decision["filters_passed"].append("confidence")
         
         # 4. 技术指标过滤器
-        indicators = self._calculate_technical_indicators(market_data, loader)
+        indicators = self._calculate_technical_indicators(market_df, ingestion)
         tech_passed, tech_reason = self._check_technical_filter(indicators, preliminary_action)
         if not tech_passed:
             decision["reason"] = f"技术指标过滤失败: {tech_reason}"

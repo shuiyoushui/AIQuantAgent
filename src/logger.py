@@ -1,9 +1,17 @@
+"""
+日志模块。
+
+职责：按日期分文件记录市场数据、AI 分析、信号、数据源与清洗、策略决策等，
+提供会话 ID 与 JSON/CSV 写入，供排查与回放使用。
+"""
 import csv
 import json
 import os
 import uuid
 import pandas as pd
+import numpy as np
 from datetime import datetime
+
 
 class SystemLogger:
     def __init__(self, log_dir="logs"):
@@ -142,8 +150,43 @@ class SystemLogger:
         if opinion_data.get('reasoning'):
             print(f"      详细推理: {opinion_data.get('reasoning', 'N/A')}")
 
+    def _convert_to_json_serializable(self, obj):
+        """将 numpy 类型和其他不可序列化类型转换为 JSON 可序列化类型"""
+        import numpy as np
+        import pandas as pd
+        
+        # 检查是否为 numpy 整数类型（兼容 NumPy 2.0）
+        if isinstance(obj, np.integer):
+            return int(obj)
+        # 检查是否为 numpy 浮点数类型（兼容 NumPy 2.0）
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        # 检查是否为 numpy 布尔类型（兼容 NumPy 1.x 和 2.x）
+        elif type(obj).__module__ == 'numpy' and type(obj).__name__ in ('bool_', 'bool', 'bool8'):
+            return bool(obj)
+        # 检查是否为 numpy 数组
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        # 检查是否为 pandas Timestamp
+        elif isinstance(obj, pd.Timestamp):
+            return obj.isoformat()
+        # 递归处理字典
+        elif isinstance(obj, dict):
+            return {k: self._convert_to_json_serializable(v) for k, v in obj.items()}
+        # 递归处理列表和元组
+        elif isinstance(obj, (list, tuple)):
+            return [self._convert_to_json_serializable(item) for item in obj]
+        # 检查是否为 pandas NaN
+        elif pd.isna(obj):
+            return None
+        return obj
+
     def log_strategy(self, symbol, is_generated, strategy_details, error=None):
         """记录策略生成状态和策略明细"""
+        # 转换 strategy_details 中的 numpy 类型
+        if strategy_details:
+            strategy_details = self._convert_to_json_serializable(strategy_details)
+        
         log_entry = {
             "timestamp": datetime.now().isoformat(),
             "symbol": symbol,

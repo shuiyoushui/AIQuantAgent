@@ -1,3 +1,9 @@
+"""
+配置模块。
+
+职责：从 .env 加载环境变量，提供交易所、交易对、API、风控等全局配置常量，
+供数据采集、信号生成、策略、风控等模块读取。
+"""
 import os
 from pathlib import Path
 from dotenv import load_dotenv
@@ -62,6 +68,11 @@ class Config:
     ARBITRAGE_FEE_RATE = 0.003 
     # 资金费率年化阈值 (低于此值不建议套利)
     MIN_APR_THRESHOLD = 0.10  # 10%
+    
+    # --- 6. 风控参数 ---
+    MAX_POSITION_PCT = float(os.getenv("MAX_POSITION_PCT", "0.1"))  # 单笔最大持仓比例 10%
+    MAX_DRAWDOWN_PCT = float(os.getenv("MAX_DRAWDOWN_PCT", "0.05"))  # 最大回撤熔断阈值 5%
+    PRICE_DEVIATION_LIMIT = float(os.getenv("PRICE_DEVIATION_LIMIT", "0.02"))  # 防乌龙指：下单价偏离现价不得超过 2%
     
       # 5. AI 分析指令 (强制结构化输出)
     SENTIMENT_PROMPT = """

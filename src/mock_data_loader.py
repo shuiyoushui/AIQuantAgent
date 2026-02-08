@@ -1,8 +1,13 @@
-#这个模块的作用是生成看似真实的 K 线数据（OHLCV），让你的策略引擎有东西可算。
+"""
+模拟数据加载器。
+
+职责：在无实盘/无 API 时生成随机漫步的 K 线（OHLCV），供策略引擎或回测做演示与联调。
+"""
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 import random
+
 
 class MockDataLoader:
     def __init__(self):
