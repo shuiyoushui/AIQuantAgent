@@ -18,9 +18,14 @@ RESET = "\033[0m"
 class AIQuantAgent:
     def __init__(self):
         print("🤖 系统初始化...")
-        self.loader = DataLoader()
-        self.analyst = SignalGenerator("src/config_signal.yaml")
-        self.trader = StrategyEngine("src/config_strategy.yaml")
+        # 初始化日志系统
+        self.logger = SystemLogger()
+        self.session_id = self.logger.start_session()
+        
+        # 初始化各个模块，并传入 logger
+        self.loader = DataLoader(logger=self.logger)
+        self.analyst = SignalGenerator("src/config_signal.yaml", logger=self.logger)
+        self.trader = StrategyEngine("src/config_strategy.yaml", logger=self.logger)
 
     def print_status(self, step_name, is_success, details=""):
         """标准化的状态输出函数"""
@@ -29,42 +34,50 @@ class AIQuantAgent:
 
     def analyze_single_asset(self, coin):
         print(f"\n{'-'*20} 🛡️ 深度审计: {coin} {'-'*20}")
+        print(f"📋 [日志] 会话ID: {self.session_id}")
         
-        # --- 步骤 1: 数据源健康检查 ---
-        # 注意：这里需要配合修改后的 data_loader 返回 (news_text, status_dict)
+        # --- 步骤 1: 数据源连接和数据获取 ---
+        # 日志会在 data_loader 内部自动记录和输出
+        print(f"\n{'='*50}")
+        print(f"📊 [步骤1] 数据源连接与数据获取")
+        print(f"{'='*50}")
         news_text, source_status = self.loader.fetch_news_context(coin)
         
-        print(f"1. 数据源连接:")
-        self.print_status("Yahoo财经", source_status.get('yahoo', False))
-        self.print_status("Google新闻", source_status.get('google', False))
-        self.print_status("行业RSS", source_status.get('rss', False))
-        
-        if not news_text:
+        if not news_text or "No recent news" in news_text:
             print(f"{RED}⚠️ 严重警告: 所有舆情数据源均失效，跳过此币种分析！{RESET}")
             return
 
-        # --- 步骤 2: AI 信号生成检查 ---
+        # --- 步骤 2: AI 信号生成和观点输出 ---
+        # 日志会在 signal_generator 内部自动记录和输出
+        print(f"\n{'='*50}")
+        print(f"🤖 [步骤2] AI 大模型分析")
+        print(f"{'='*50}")
         ai_signal = self.analyst.analyze_market_sentiment(coin)
+        
         # 检查是否生成了有效的 JSON 对象，且包含必要字段
         is_signal_valid = ai_signal is not None and 'sentiment_score' in ai_signal
         
-        print(f"2. AI大脑状态:")
-        self.print_status("信号生成", is_signal_valid, 
-                          f"(分值: {ai_signal.get('sentiment_score', 'N/A')})" if is_signal_valid else "解析失败或拒绝回答")
-        
         if not is_signal_valid:
+            print(f"{RED}❌ AI 分析失败，跳过策略生成{RESET}")
             return
 
-        # --- 步骤 3: 策略引擎检查 ---
+        # --- 步骤 3: 策略生成 ---
+        # 日志会在 strategy_engine 内部自动记录和输出
+        print(f"\n{'='*50}")
+        print(f"📈 [步骤3] 策略生成")
+        print(f"{'='*50}")
         market_data = self.loader.fetch_deep_market_data(coin)
         is_market_data_valid = market_data is not None
         
-        trade_order = self.trader.generate_trade_decision(ai_signal)
-        is_strategy_valid = trade_order.get('action') != "ERROR" # 假设策略出错会返回 ERROR
+        if not is_market_data_valid:
+            print(f"{YELLOW}⚠️ 市场数据获取失败，策略可能不完整{RESET}")
         
-        print(f"3. 决策执行:")
-        self.print_status("行情获取", is_market_data_valid)
-        self.print_status("策略计算", is_strategy_valid, f"-> {trade_order.get('action')} @ ${trade_order.get('price', 0)}")
+        # 传递 market_data 和 loader 给策略生成方法，以便获取真实价格和技术指标
+        trade_order = self.trader.generate_trade_decision(ai_signal, market_data, self.loader)
+        
+        print(f"\n{'='*50}")
+        print(f"✅ [完成] {coin} 分析完成")
+        print(f"{'='*50}\n")
 
     def run_cycle(self):
         targets = Config.TARGET_COINS

@@ -29,12 +29,13 @@ except ImportError:
         GOOGLE_NEWS_TEMPLATE = ""
 
 class DataLoader:
-    def __init__(self):
+    def __init__(self, logger=None):
         print("🔌 [系统] 初始化数据连接模块...")
         
         self.exchange = None
         self.static_rss = getattr(Config, 'RSS_STATIC_FEEDS', {})
         self.headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        self.logger = logger
 
         # 1. 环境变量清洗
         for key in ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY']:
@@ -82,16 +83,28 @@ class DataLoader:
         # 再次兜底清洗
         return s.strip()
 
-    def _clean_text(self, raw_html):
-        """清洗 HTML 标签"""
-        if not raw_html: return ""
+    def _clean_text(self, raw_text):
+        """清洗文本内容（去除 HTML 标签、多余空格等）"""
+        if not raw_text: 
+            return ""
+        
         try:
-            soup = BeautifulSoup(raw_html, "html.parser")
-            text = soup.get_text(separator=" ")
+            # 尝试解析 HTML（如果包含 HTML 标签）
+            if '<' in raw_text and '>' in raw_text:
+                soup = BeautifulSoup(raw_text, "html.parser")
+                text = soup.get_text(separator=" ")
+            else:
+                text = raw_text
+            
+            # 去除 Google News 特有的噪音
             text = re.sub(r'View Full Coverage on Google News', '', text, flags=re.IGNORECASE)
-            return re.sub(r'\s+', ' ', text).strip()
-        except:
-            return str(raw_html)
+            # 去除多余空格
+            cleaned_text = re.sub(r'\s+', ' ', text).strip()
+            
+            return cleaned_text
+        except Exception as e:
+            # 如果清洗失败，返回原始文本
+            return str(raw_text)
 
     # ========================================================
     # 1. 获取深度行情 (自动适配现货与合约)
@@ -184,33 +197,115 @@ class DataLoader:
         
         combined_news = []
         status = {"yahoo": False, "google": False, "rss": False}
+        raw_news_items = {"yahoo": [], "google": [], "rss": []}  # 用于记录原始数据
 
         # Yahoo Finance (需要 symbol-USD 格式)
+        yahoo_count = 0
         try:
             yf_ticker = yf.Ticker(f"{base_coin}-USD")
             if hasattr(yf_ticker, 'news') and yf_ticker.news:
                 status['yahoo'] = True
                 for item in yf_ticker.news[:3]:
                     title = item.get('content', {}).get('title', item.get('title'))
-                    if title: combined_news.append(f"[Yahoo] {title}")
-        except: pass
+                    if title: 
+                        raw_news_items['yahoo'].append(title)
+                        combined_news.append(f"[Yahoo] {title}")
+                        yahoo_count += 1
+                if self.logger:
+                    self.logger.log_data_source(base_coin, "Yahoo财经", True, yahoo_count)
+            else:
+                if self.logger:
+                    self.logger.log_data_source(base_coin, "Yahoo财经", False, 0, "无新闻数据")
+        except Exception as e:
+            if self.logger:
+                self.logger.log_data_source(base_coin, "Yahoo财经", False, 0, str(e))
 
         # Google RSS
+        google_count = 0
         try:
             rss_url = Config.GOOGLE_NEWS_TEMPLATE.format(base_coin)
             feed = feedparser.parse(rss_url)
             if feed.entries:
                 status['google'] = True
                 for entry in feed.entries[:3]:
+                    raw_news_items['google'].append(entry.title)
                     combined_news.append(f"[Google] {entry.title}")
-        except: pass
+                    google_count += 1
+                if self.logger:
+                    self.logger.log_data_source(base_coin, "Google新闻", True, google_count)
+            else:
+                if self.logger:
+                    self.logger.log_data_source(base_coin, "Google新闻", False, 0, "RSS 无条目")
+        except Exception as e:
+            if self.logger:
+                self.logger.log_data_source(base_coin, "Google新闻", False, 0, str(e))
 
-        # 静态 RSS (仅对主流币有效)
-        if base_coin in ["BTC", "ETH", "SOL"]:
-            if self.static_rss:
-                status['rss'] = True
-                # 这里只简单模拟，实际需遍历 self.static_rss
-                combined_news.append(f"[RSS] {base_coin} market maintains high volatility.")
+        # 静态 RSS (对所有币种都尝试，但会过滤包含币种名称的新闻)
+        rss_count = 0
+        if self.static_rss:
+            try:
+                # 遍历所有静态 RSS 源
+                for rss_name, rss_url in self.static_rss.items():
+                    feed = feedparser.parse(rss_url)
+                    if feed.entries:
+                        # 对每个币种，只选择包含该币种名称的新闻，确保新闻相关性
+                        for entry in feed.entries[:5]:  # 扩大搜索范围
+                            title = entry.get('title', '')
+                            # 检查标题中是否包含币种名称（不区分大小写）
+                            if base_coin.upper() in title.upper():
+                                raw_news_items['rss'].append(title)
+                                combined_news.append(f"[RSS-{rss_name}] {title}")
+                                rss_count += 1
+                                if rss_count >= 3:  # 每个币种最多3条RSS新闻
+                                    break
+                if rss_count > 0:
+                    status['rss'] = True
+                    if self.logger:
+                        self.logger.log_data_source(base_coin, "行业RSS", True, rss_count)
+                else:
+                    if self.logger:
+                        self.logger.log_data_source(base_coin, "行业RSS", False, 0, f"未找到包含 {base_coin} 的新闻")
+            except Exception as e:
+                if self.logger:
+                    self.logger.log_data_source(base_coin, "行业RSS", False, 0, str(e))
 
-        final_text = "\n".join(combined_news) if combined_news else f"No recent news for {base_coin}."
+        # 数据清洗：对每条新闻进行清洗，并按数据源记录日志
+        cleaned_news = []
+        
+        # 按数据源分组清洗，以便准确记录日志
+        yahoo_raw = [item for item in combined_news if "[Yahoo]" in item]
+        google_raw = [item for item in combined_news if "[Google]" in item]
+        rss_raw = [item for item in combined_news if "[RSS" in item]
+        
+        # 清洗 Yahoo 数据
+        yahoo_cleaned_count = 0
+        for news_item in yahoo_raw:
+            cleaned_item = self._clean_text(news_item)
+            if cleaned_item:
+                cleaned_news.append(cleaned_item)
+                yahoo_cleaned_count += 1
+        if self.logger and len(yahoo_raw) > 0:
+            self.logger.log_data_cleaning(base_coin, "Yahoo财经", True, len(yahoo_raw), yahoo_cleaned_count)
+        
+        # 清洗 Google 数据
+        google_cleaned_count = 0
+        for news_item in google_raw:
+            cleaned_item = self._clean_text(news_item)
+            if cleaned_item:
+                cleaned_news.append(cleaned_item)
+                google_cleaned_count += 1
+        if self.logger and len(google_raw) > 0:
+            self.logger.log_data_cleaning(base_coin, "Google新闻", True, len(google_raw), google_cleaned_count)
+        
+        # 清洗 RSS 数据
+        rss_cleaned_count = 0
+        for news_item in rss_raw:
+            cleaned_item = self._clean_text(news_item)
+            if cleaned_item:
+                cleaned_news.append(cleaned_item)
+                rss_cleaned_count += 1
+        if self.logger and len(rss_raw) > 0:
+            self.logger.log_data_cleaning(base_coin, "行业RSS", True, len(rss_raw), rss_cleaned_count)
+
+        final_text = "\n".join(cleaned_news) if cleaned_news else f"No recent news for {base_coin}."
         return final_text, status

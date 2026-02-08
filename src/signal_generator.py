@@ -6,7 +6,7 @@ from .config import Config
 from .data_loader import DataLoader
 
 class SignalGenerator:
-    def __init__(self, config_path="src/config_signal.yaml"):
+    def __init__(self, config_path="src/config_signal.yaml", logger=None):
         # 1. 加载配置
         try:
             with open(config_path, 'r', encoding='utf-8') as f:
@@ -15,7 +15,8 @@ class SignalGenerator:
             print(f"❌ 配置文件加载失败: {e}")
             raise
 
-        self.loader = DataLoader()
+        self.logger = logger
+        self.loader = DataLoader(logger=logger)
         
         # 2. 初始化客户端
         api_key = Config.DEEPSEEK_API_KEY or Config.OPENAI_API_KEY
@@ -28,13 +29,16 @@ class SignalGenerator:
             
         self.client = OpenAI(api_key=api_key, base_url=base_url)
 
-    def _construct_prompt(self, news_text):
-        """构建提示词"""
+    def _construct_prompt(self, news_text, symbol):
+        """构建提示词，明确指定币种名称以确保分析准确性"""
         instruction = self.config['sentiment_analysis'].get('output_format_instruction', '')
         examples = self.config['sentiment_analysis'].get('examples', [])
         examples_str = "\n".join([f"输入: {ex['input']}\n输出: {ex['output']}" for ex in examples])
+        
+        # 在 prompt 中明确强调币种名称，确保 AI 知道正在分析哪个币
+        symbol_emphasis = f"\n\n【重要提示】请专注于分析 {symbol} (或 {symbol}-USD) 相关的新闻内容，忽略其他币种的新闻。"
             
-        return f"{instruction}\n\n### 参考示例:\n{examples_str}\n\n### 待分析新闻:\n{news_text}"
+        return f"{instruction}{symbol_emphasis}\n\n### 参考示例:\n{examples_str}\n\n### 待分析新闻:\n{news_text}"
 
     def analyze_market_sentiment(self, symbol="BTC"):
         """获取新闻 -> 调用LLM -> 返回结构化信号"""
@@ -45,9 +49,9 @@ class SignalGenerator:
             print(f"   ⚠️ {symbol} 新闻数据不足，跳过 AI 分析")
             return None
             
-        # 2. 构建 Prompt
+        # 2. 构建 Prompt（传入 symbol 以确保 AI 知道正在分析哪个币）
         system_prompt = self.config['sentiment_analysis']['system_prompt']
-        user_prompt = self._construct_prompt(raw_news)
+        user_prompt = self._construct_prompt(raw_news, symbol)
         
         print(f"   🧠 [AI 分析师] 正在阅读 {symbol} 的新闻并思考...")
         
@@ -82,6 +86,10 @@ class SignalGenerator:
             
             signal_data['symbol'] = symbol
             signal_data['source_status'] = source_status
+            
+            # 5. 记录 AI 观点日志
+            if self.logger:
+                self.logger.log_ai_opinion(symbol, signal_data)
             
             return signal_data
 

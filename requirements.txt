@@ -1,5 +1,10 @@
 ccxt
 pandas
-pandas_ta
 supabase
 python-dotenv
+pyyaml
+numpy
+yfinance
+feedparser
+beautifulsoup4
+openai
