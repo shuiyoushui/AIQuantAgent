@@ -1,6 +1,19 @@
 # AIQuantAgent
 
-AI 驱动的量化交易系统：**模块化架构**，支持多策略切换（事件驱动 / RSI / 混合）、多层过滤与风控，以及离线回测。默认模拟运行，不进行实盘交易。
+AI 驱动的量化交易系统：**多智能体架构**，支持舆情/技术/基本面因子、LLM 驱动决策、风控中台与事件驱动回测。默认模拟运行，不进行实盘交易。
+
+---
+
+## 目录
+
+- [快速开始](#快速开始)
+- [系统架构图](#系统架构图)
+- [项目路径与模块说明](#项目路径与模块说明)
+- [使用方法](#使用方法)
+- [LLM 模型配置](#llm-模型配置)
+- [回测使用说明](#回测使用说明)
+- [环境与依赖](#环境与依赖)
+- [注意事项](#注意事项)
 
 ---
 
@@ -12,181 +25,375 @@ cd AIQuantAgent
 pip install -r requirements.txt
 ```
 
-在项目根目录创建 `.env`，至少配置 AI API（事件驱动/混合策略依赖）：
+在项目根目录创建 `.env`，配置 API Key：
 
 ```env
-DEEPSEEK_API_KEY=your_key
-# 或 OPENAI_API_KEY=your_key
+# 至少配置一个（多智能体架构依赖）
+DEEPSEEK_API_KEY=sk-xxx
+# 或 OPENAI_API_KEY=sk-xxx
+# 或 OPENROUTER_API_KEY=sk-or-v1-xxx  # 用于 Gemini 等
 ```
 
-运行主流程（按 `src/config_strategy.yaml` 中第一个 `enabled: true` 的策略分析目标币种）：
+运行主流程：
 
 ```bash
 python main.py
-python main.py --symbol BNB/USDT   # 指定单币种
+python main.py --symbol BNB        # 指定单币种
+python main.py --legacy            # 使用旧版策略注册表流程
 ```
 
-运行离线回测（默认使用模拟收益序列）：
+---
+
+## 系统架构图
+
+### 多智能体架构（当前主流程）
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              main.py (主入口)                                 │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  Step 1: DataAgent (数据清洗中台)                                             │
+│  ┌──────────────────────────────────────────────────────────────────────┐   │
+│  │  整合 DataIngestion + DataProcessor                                   │   │
+│  │  输出: MarketData (df_price, news_list, metadata)                     │   │
+│  └──────────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  Step 2: AnalystGroup (因子总线)                                              │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐                     │
+│  │ Sentiment   │  │ Technical   │  │ Fundamental     │  → factor_context   │
+│  │ Analyst     │  │ Analyst     │  │ Analyst         │                     │
+│  │ (LLM)       │  │ (LLM)       │  │ (LLM)           │                     │
+│  └─────────────┘  └─────────────┘  └─────────────────┘                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  Step 3: StrategyAgent (策略智能体 - LLM 驱动)                                │
+│  ┌──────────────────────────────────────────────────────────────────────┐   │
+│  │  generate_decision(factor_context, market_data) → action, price, qty │   │
+│  └──────────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  Step 4: RiskManager (风控中台)                                               │
+│  ┌──────────────────────────────────────────────────────────────────────┐   │
+│  │  check(decision, account_state) → passed / rejection                  │   │
+│  └──────────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  Step 5: Execution (模拟执行)                                                 │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 数据流示意
+
+```
+API/CSV 原始数据  →  DataAgent.get_data()  →  MarketData
+                                                    │
+                                                    ├── df_price (OHLCV)
+                                                    ├── news_list
+                                                    └── metadata
+                                                    │
+                                                    ▼
+                                          AnalystGroup.produce_factor_context()
+                                                    │
+                                                    ├── sentiment_score, hot_topic, confidence
+                                                    ├── rsi_14, macd_diff, volatility, technical_signal
+                                                    └── funding_rate_factor
+                                                    │
+                                                    ▼
+                                          StrategyAgent.generate_decision()
+                                                    │
+                                                    ▼
+                                          RiskManager.check()  →  最终决策
+```
+
+---
+
+## 项目路径与模块说明
+
+### 目录结构
+
+```
+AIQuantAgent/
+├── main.py                    # 主入口
+├── run_backtest.py            # 回测入口
+├── .env                       # 环境变量（API Key 等）
+├── requirements.txt
+├── scripts/
+│   ├── generate_demo_ohlcv.py # 生成演示 K 线数据
+│   └── download_ohlcv.py      # 从 OKX 下载历史 K 线
+├── data/                      # 历史数据目录
+│   └── demo_ohlcv.csv
+├── logs/                      # 日志输出
+└── src/
+    ├── config.py              # 全局配置（从 .env 读取）
+    ├── config_strategy.yaml   # 策略参数（仓位、止盈止损等）
+    ├── config_signal.yaml     # 旧版信号配置（部分兼容）
+    ├── config/
+    │   └── agents/            # 各 Agent 的 LLM 与提示词配置
+    │       ├── sentiment_analyst.yaml
+    │       ├── technical_analyst.yaml
+    │       ├── fundamental_analyst.yaml
+    │       └── strategy_agent.yaml
+    ├── models/
+    │   └── market_data.py     # 标准 MarketData 数据结构
+    ├── agents/                # 多智能体
+    │   ├── llm_base.py        # LLM 驱动基类
+    │   ├── data_agent.py      # 数据清洗智能体
+    │   ├── analysts.py        # 因子分析师组
+    │   └── strategy_agent.py  # 策略智能体
+    ├── data/
+    │   └── historical_loader.py  # 历史数据加载
+    ├── data_ingestion.py      # 数据采集（OKX、Yahoo、RSS）
+    ├── data_processor.py      # 数据清洗
+    ├── event_driven_backtest.py  # 事件驱动回测引擎
+    ├── backtest_engine.py     # 收益序列绩效计算
+    ├── risk_manager.py        # 风控
+    ├── strategy_registry.py   # 策略注册表（旧版）
+    ├── strategy_adapters.py   # RSI、Hybrid 适配器
+    └── ...
+```
+
+### 核心模块与路径
+
+| 模块 | 路径 | 说明 |
+|------|------|------|
+| MarketData | `src/models/market_data.py` | 标准数据结构 |
+| DataAgent | `src/agents/data_agent.py` | 数据清洗中台 |
+| AnalystGroup | `src/agents/analysts.py` | 因子总线 |
+| StrategyAgent | `src/agents/strategy_agent.py` | 策略智能体 |
+| RiskManager | `src/risk_manager.py` | 风控中台 |
+| EventDrivenBacktest | `src/event_driven_backtest.py` | 事件驱动回测 |
+| BacktestEngine | `src/backtest_engine.py` | 收益序列绩效计算 |
+
+---
+
+## 使用方法
+
+### 1. 运行主流程（多智能体）
 
 ```bash
-python run_backtest.py
+# 分析配置中的全部币种
+python main.py
+
+# 指定单币种
+python main.py --symbol BTC
+python main.py --symbol BNB
+```
+
+### 2. 使用旧版策略流程
+
+```bash
+python main.py --legacy
+```
+
+旧版使用 `config_strategy.yaml` 中的 `strategies`，取第一个 `enabled: true` 的策略（event_driven / rsi / hybrid）。
+
+### 3. 修改目标币种
+
+编辑 `src/config.py` 或通过环境变量：
+
+```env
+# .env
+TARGET_COINS=BTC,ETH,SOL
 ```
 
 ---
 
-## 架构概览
+## LLM 模型配置
 
-系统采用**分层 + 可插拔策略**的设计：数据层 → 信号层 → 策略层 → 风控层 → 日志，策略通过注册表按配置启用，便于扩展与切换。
+每个 Agent 可**独立配置**大模型和提示词，配置位于 `src/config/agents/`。
 
-```
-                    ┌─────────────────────────────────────┐
-                    │         main.py (AIQuantAgent)       │
-                    │  协调流程 · 会话 · 策略选择           │
-                    └─────────────────┬───────────────────┘
-                                      │
-    ┌─────────────────────────────────┼─────────────────────────────────┐
-    │                                 │                                 │
-    ▼                                 ▼                                 ▼
-┌───────────────┐            ┌─────────────────┐            ┌─────────────────┐
-│  数据层       │            │  信号层         │            │  策略层         │
-│ DataIngestion │───────────▶│ SignalGenerator │───────────▶│ StrategyRegistry│
-│ DataProcessor │  市场+新闻  │ (AI 情绪分析)   │  ai_signal │ (按配置取策略)   │
-└───────────────┘            └─────────────────┘            └────────┬────────┘
-                                                                     │
-    ┌────────────────────────────────────────────────────────────────┤
-    │                        StrategyEngine / Adapters               │
-    │  event_driven │ rsi │ hybrid  → generate_trade_decision        │
-    └────────────────────────────────────────────────────────────────┘
-                                      │
-    ┌─────────────────────────────────┼─────────────────────────────────┐
-    │                                 ▼                                 │
-    │                    ┌─────────────────────┐                         │
-    │                    │  风控层             │                         │
-    │                    │  RiskManager        │                         │
-    │                    │  check_risk()       │                         │
-    │                    └──────────┬─────────┘                         │
-    │                                │                                  │
-    │                                ▼                                  │
-    │                    ┌─────────────────────┐                         │
-    │                    │  日志层             │  配置层                  │
-    │                    │  SystemLogger       │  Config + YAML          │
-    │                    └─────────────────────┘                         │
-    └───────────────────────────────────────────────────────────────────┘
+### 配置项说明
+
+每个 YAML 的 `llm` 段落：
+
+| 配置项 | 说明 | 示例 |
+|--------|------|------|
+| model_name | 模型名称 | deepseek-chat、gpt-4、google/gemini-1.5-pro |
+| api_key_env | 环境变量名 | DEEPSEEK_API_KEY、OPENAI_API_KEY、OPENROUTER_API_KEY |
+| base_url | API 地址 | 留空则按 api_key_env 自动推断 |
+| temperature | 温度 | 0.1 |
+| max_tokens | 最大 token | 1024 |
+
+### 方案一：DeepSeek
+
+`.env`：
+
+```env
+DEEPSEEK_API_KEY=sk-xxx
 ```
 
----
-
-## 模块说明与使用
-
-每个模块**职责单一**，通过主流程或脚本组合使用；下表给出「价值」与「如何使用」。
-
-| 模块 | 文件 | 价值 | 如何使用 |
-|------|------|------|----------|
-| **配置** | `src/config.py` | 统一从 `.env` 读 API、交易对、风控等常量 | 各模块在初始化或运行时读取 `Config.XXX`，无需改代码即可调参 |
-| **数据采集** | `src/data_ingestion.py` | 对接交易所(OKX)、yfinance、RSS 等，拉取原始行情与新闻 | 主流程在 `analyze_single_asset` 中调用 `fetch_raw_market_data`、`fetch_raw_news`、`fetch_raw_ticker_data`，仅负责「拿数据」 |
-| **数据清洗** | `src/data_processor.py` | 将原始数据转为标准 DataFrame、清洗新闻、对齐时间 | 主流程调用 `process_market_data`、`process_news_data`、`align_data`，为下游提供干净输入 |
-| **AI 信号** | `src/signal_generator.py` | 用大模型对新闻做情绪与事件分析，输出情绪分、置信度等 | 主流程调用 `analyze_market_sentiment(coin, cleaned_news)`，供事件驱动/混合策略使用；配置见 `src/config_signal.yaml` |
-| **策略注册表** | `src/strategy_registry.py` | 按 ID 注册策略类，按配置返回「当前启用」的策略实例 | 主流程启动时读 `config_strategy.yaml` 的 `strategies`，取第一个 `enabled: true` 的 id，调用 `get_strategy(id, config_path, logger)` 得到 `self.trader` |
-| **策略引擎** | `src/strategy_engine.py` | 事件驱动趋势跟踪：情绪分 + 置信度 + MA/RSI 过滤，算仓位与止损止盈 | 注册为 `event_driven`；主流程调用 `trader.generate_trade_decision(ai_signal, market_df, ticker_data, ingestion)` 与 `trader.execute(decision)` |
-| **策略实现** | `src/strategy.py` | 纯 RSI 超买超卖逻辑，无 AI、无 pandas_ta | 被 `RSIStrategyAdapter` 包装后以 `rsi` 注册；仅依赖 K 线，适合技术面回测或无 API 环境 |
-| **策略适配器** | `src/strategy_adapters.py` | 将 RSI、Hybrid 等不同接口统一成主流程需要的 `generate_trade_decision` / `execute`，并读各自配置 | RSI/Hybrid 通过适配器注册；主流程无差别调用 `trader.generate_trade_decision(...)`；各策略参数在 `config_strategy.yaml` 的 `rsi` / `hybrid` 段落配置 |
-| **风控** | `src/risk_manager.py` | 对策略输出做持仓比例、回撤、价格偏离等检查，决定是否放行 | 主流程在策略生成后调用 `check_risk(decision, current_market_data, account_balance)`，未通过则拦截并打日志 |
-| **日志** | `src/logger.py` | 按日期分文件记录数据源、清洗、AI、策略、市场等 | 各模块接收 `logger` 并调用 `log_strategy` 等；日志目录 `logs/`，便于排查与回放 |
-| **回测引擎** | `src/backtest_engine.py` | 对策略/基准收益序列做向量化绩效计算（夏普、回撤、Alpha/Beta 等） | 独立于主流程；通过 `BacktestEngine(strategy_id, start_date, end_date, granularity)` + `load_data(strategy_returns, benchmark_returns)` 或子类 `_load_data()`，再 `compute_metrics()` |
-| **回测脚本** | `run_backtest.py` | 命令行入口：支持模拟数据或 CSV 收益序列，输出指标 JSON | 单独执行 `python run_backtest.py [--strategy_id ...] [--data_csv ...] [--output ...]`，不依赖主流程 |
-
-**备用/可选模块**（不参与主流程默认链路）：
-
-- `src/data_loader.py`：备用数据加载接口，可与 DataIngestion 二选一或并存。
-- `src/mock_data_loader.py`：无实盘时生成模拟 K 线，用于联调或演示。
-- `src/hybridstrategy.py`：混合策略的原始实现（新闻+价格）；主流程通过 `strategy_adapters.HybridStrategyAdapter` 使用主流程已有的 AI 信号与 K 线，不直接依赖此类。
-
----
-
-## 如何使用
-
-### 1. 运行主流程（单币种或列表）
-
-- 默认：分析 `Config.TARGET_COINS` 中的每个币种（数据采集 → 清洗 → AI 分析 → 策略生成 → 风控 → 模拟执行 + 日志）。
-- 指定币种：`python main.py --symbol BNB/USDT`。
-
-主流程会从 `src/config_strategy.yaml` 的 `strategies` 里取**第一个 `enabled: true`** 的策略，通过注册表实例化并用于该次运行。
-
-### 2. 切换策略（启用/注释）
-
-编辑 `src/config_strategy.yaml`：
+`src/config/agents/sentiment_analyst.yaml`：
 
 ```yaml
-strategies:
-  - id: event_driven
-    enabled: true   # 当前使用
-    name: "事件驱动趋势跟踪"
-  - id: rsi
-    enabled: false
-    name: "RSI 超买超卖"
-  - id: hybrid
-    enabled: false
-    name: "混合新闻+价格"
+llm:
+  model_name: "deepseek-chat"
+  api_key_env: "DEEPSEEK_API_KEY"
+  base_url: null
+  temperature: 0.1
+  max_tokens: 1024
 ```
 
-- 只保留一个 `enabled: true`（或把要用的策略放在第一个），即可切换策略。
-- 每个策略有独立配置块（`event_driven` / `rsi` / `hybrid`），可单独调整仓位、止盈止损等。
+### 方案二：OpenAI
 
-### 3. 策略配置说明（节选）
+`.env`：
 
-- **event_driven**：`entry_rules`（情绪阈值、置信度）、`technical_filter`（MA）、`position_sizing`、`risk_management`。
-- **rsi**：`rsi_period`、`oversold`、`overbought`，以及 `position_sizing`、`risk_management`。
-- **hybrid**：`sentiment_long_threshold`、`sentiment_short_threshold`、`min_confidence`，以及 `position_sizing`、`risk_management`。
+```env
+OPENAI_API_KEY=sk-xxx
+```
 
-完整示例见 `src/config_strategy.yaml`。
+YAML 中：
 
-### 4. 离线回测
+```yaml
+llm:
+  model_name: "gpt-4"
+  api_key_env: "OPENAI_API_KEY"
+  base_url: null
+```
 
-- **仅跑通/演示**：  
-  `python run_backtest.py`  
-  使用脚本内生成的模拟收益序列。
+### 方案三：OpenRouter（Gemini 等）
 
-- **指定区间与颗粒度**：  
-  `python run_backtest.py --strategy_id my_strategy --start 2024-01-01 --end 2024-12-31 --granularity 1d`
+OpenRouter 提供 OpenAI 兼容接口，可调用 Gemini、Claude 等。Key 需在 [OpenRouter](https://openrouter.ai/keys) 获取，**不是** Google AI Studio 的 Key。
 
-- **用自有收益数据**：  
-  CSV 需包含日期列与策略/基准收益列（默认列名 `date`、`strategy_return`、`benchmark_return`，可用 `--strategy_col`/`--benchmark_col`/`--date_col` 覆盖）。  
-  `python run_backtest.py --data_csv path/to/returns.csv --output results/metrics.json`
+`.env`：
 
-回测指标包括：总收益、年化收益、超额收益、夏普/索提诺、最大回撤及区间、Alpha/Beta、胜率与盈亏比等（见 `src/backtest_engine.py` 的 `compute_metrics` 返回值）。
+```env
+OPENROUTER_API_KEY=sk-or-v1-xxx
+```
 
-### 5. 扩展新策略
+YAML 中：
 
-1. 在 `src/strategy_registry.py` 的 `REGISTRY` 中增加一项（`strategy_id` → 类工厂 + 可选 `default_config_path`）。
-2. 在 `src/config_strategy.yaml` 的 `strategies` 中增加对应 id，并设置 `enabled`。
-3. 若新策略接口与主流程不一致，在 `src/strategy_adapters.py` 中写适配器，实现 `generate_trade_decision` 与 `execute`，并在注册表中指向该适配器类。
+```yaml
+llm:
+  model_name: "google/gemini-1.5-pro"   # 或 gemini-1.5-flash
+  api_key_env: "OPENROUTER_API_KEY"
+  base_url: "https://openrouter.ai/api/v1"
+  temperature: 0.1
+  max_tokens: 1024
+```
+
+### 各 Agent 配置文件
+
+| 文件 | 对应 Agent |
+|------|------------|
+| `src/config/agents/sentiment_analyst.yaml` | 舆情分析师 |
+| `src/config/agents/technical_analyst.yaml` | 技术分析师 |
+| `src/config/agents/fundamental_analyst.yaml` | 基本面分析师 |
+| `src/config/agents/strategy_agent.yaml` | 策略智能体 |
+
+可分别为不同 Agent 指定不同模型（如舆情用 Gemini、策略用 DeepSeek）。
+
+### 自定义提示词
+
+每个 YAML 还包含 `system_prompt`、`output_format_instruction`、`examples` 等，可直接编辑以调整 Agent 行为。
+
+---
+
+## 回测使用说明
+
+### 模式一：事件驱动回测（策略 + 历史 K 线）
+
+逐 bar 运行多智能体策略，支持风控拒绝记录。
+
+**1. 准备历史数据**
+
+```bash
+# 方式 A：生成演示数据（无需 API）
+python scripts/generate_demo_ohlcv.py --output data/demo_ohlcv.csv --days 90
+
+# 方式 B：从 OKX 下载（需配置 OKX API）
+python scripts/download_ohlcv.py --symbol BTC --limit 500 --output data/btc_ohlcv.csv
+```
+
+**2. 运行回测**
+
+```bash
+# 使用 CSV 数据
+python run_backtest.py --mode event --data data/demo_ohlcv.csv --symbol BTC
+
+# 从 API 获取数据
+python run_backtest.py --mode event --source api --symbol BTC --limit 300
+
+# 指定初始资金、输出指标 JSON、保存收益序列
+python run_backtest.py --mode event --data data/demo_ohlcv.csv --symbol BTC \
+  --initial_balance 100000 --output results/metrics.json --save_returns data/returns.csv
+```
+
+**事件回测参数：**
+
+| 参数 | 说明 | 默认 |
+|------|------|------|
+| --mode | event / returns | event |
+| --data | K 线 CSV 路径 | data/demo_ohlcv.csv |
+| --source | csv / api | csv |
+| --symbol | 标的 | BTC |
+| --limit | API 模式 K 线数量 | 500 |
+| --initial_balance | 初始资金 | 100000 |
+| --output | 指标 JSON 输出路径 | - |
+| --save_returns | 收益序列 CSV 路径 | - |
+
+### 模式二：收益序列回测
+
+对已有策略/基准收益序列计算绩效指标。
+
+**CSV 格式要求：** 含 `date`、`strategy_return`、`benchmark_return` 列（列名可用参数覆盖）。
+
+```bash
+python run_backtest.py --mode returns --data_csv path/to/returns.csv
+
+# 指定列名
+python run_backtest.py --mode returns --data_csv returns.csv \
+  --strategy_col strategy_return --benchmark_col benchmark_return --date_col date
+
+# 无 CSV 时使用模拟数据
+python run_backtest.py --mode returns --start 2024-01-01 --end 2024-12-31
+```
+
+**returns 模式参数：**
+
+| 参数 | 说明 |
+|------|------|
+| --data_csv | 收益 CSV 路径 |
+| --strategy_col | 策略收益列名 |
+| --benchmark_col | 基准收益列名 |
+| --date_col | 日期列名 |
+| --start, --end | 时间范围 |
+| --granularity | 1d / 1m / tick |
+
+### 回测输出指标
+
+- 收益：总收益、年化收益、超额收益
+- 风险：夏普、索提诺、波动率、Alpha、Beta
+- 回撤：最大回撤及区间
+- 胜率：胜率、盈亏比
 
 ---
 
 ## 环境与依赖
 
-- **Python**：3.10+（推荐 3.13）。策略层使用纯 pandas 计算 RSI，无 pandas_ta 依赖。
-- **依赖**：见 `requirements.txt`（含 pandas、numpy、ccxt、yfinance、openai、pyyaml 等）。
-
----
-
-## 日志目录
-
-日志写入 `logs/`，按日期分文件，例如：
-
-- `strategy_YYYY-MM-DD.jsonl` — 策略生成记录  
-- `ai_opinion_YYYY-MM-DD.jsonl` — AI 观点  
-- `data_source_YYYY-MM-DD.jsonl` — 数据源  
-- `market_data_YYYY-MM-DD.csv`、`signals_YYYY-MM-DD.csv` — 市场与信号快照  
+- **Python**：3.10+
+- **依赖**：见 `requirements.txt`（pandas、numpy、ccxt、yfinance、openai、pyyaml 等）
 
 ---
 
 ## 注意事项
 
 1. **模拟模式**：当前不进行实盘交易，仅输出决策与模拟执行信息。
-2. **AI 依赖**：事件驱动与混合策略依赖 `SignalGenerator` 的情绪分析，需配置 `DEEPSEEK_API_KEY` 或 `OPENAI_API_KEY`。
-3. **策略切换**：修改 `config_strategy.yaml` 中 `strategies` 的 `enabled` 即可，无需改代码。
-4. **网络**：数据采集与 AI 调用需访问外网，请保证网络可用。
+2. **API Key**：至少配置一个 LLM 的 API Key，推荐 DeepSeek 或 OpenRouter。
+3. **网络**：数据采集与 AI 调用需访问外网。
+4. **回测数据**：事件驱动回测需至少 50 条 K 线；可先用 `generate_demo_ohlcv.py` 生成演示数据。
+5. **Gemini 直接接入**：Google AI Studio 的 Key（`AIzaSy...`）不能直接用于 OpenAI 客户端，需通过 OpenRouter 等 OpenAI 兼容代理。
 
 ---
 

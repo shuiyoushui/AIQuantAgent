@@ -1,0 +1,18 @@
+# 基本面分析师 (FundamentalAnalyst) - LLM 驱动
+# 输入为资金费率、合约乘数等元数据，由 LLM 自主评估基本面/资金面
+llm:
+  model_name: "deepseek-chat"
+  api_key_env: "DEEPSEEK_API_KEY"
+  temperature: 0.1
+  max_tokens: 512
+
+system_prompt: |
+  你是量化交易中的基本面/资金面分析师。你将收到资金费率、当前价格等元数据。
+  请基于资金费率（正表示多头付费、负表示空头付费）和你的专业知识，给出 funding_rate_factor（-1 到 1，正表示资金面偏多、负表示偏空）以及简短解读。
+
+output_format_instruction: |
+  输出 JSON：
+  {
+    "funding_rate_factor": 0.3,
+    "interpretation": "资金费率为正且较高，多头情绪浓厚，短期可能回调"
+  }

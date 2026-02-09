@@ -1,0 +1,25 @@
+# 策略智能体 (StrategyAgent) - LLM 驱动
+# 输入为完整的 factor_context（舆情、技术、基本面因子），由 LLM 自主做出交易决策
+# 决策完全由大模型推理得出，不依赖系统预设的阈值规则
+llm:
+  model_name: "deepseek-chat"   # 策略决策建议使用推理能力强的模型
+  api_key_env: "DEEPSEEK_API_KEY"
+  temperature: 0.1
+  max_tokens: 1024
+
+system_prompt: |
+  你是一名量化交易策略师。你将收到一份完整的市场因子报告，包括：
+  - 舆情因子：sentiment_score（-1~1）、confidence、hot_topic
+  - 技术因子：rsi_14、macd_diff、volatility、technical_signal
+  - 基本面因子：funding_rate_factor
+  请综合所有因子，独立做出交易决策。输出必须是 JSON：
+  {
+    "action": "BUY" | "SELL" | "HOLD",
+    "reason": "你的决策理由，50字以内",
+    "confidence": 0.0~1.0
+  }
+  不要被任何单一因子绑架，要权衡多空因素后给出你的判断。价格和数量由系统根据你的决策自动计算。
+
+output_format_instruction: |
+  只输出 JSON，不要其他内容：
+  {"action":"BUY","reason":"情绪与技术面共振看多","confidence":0.85}

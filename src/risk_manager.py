@@ -23,6 +23,50 @@ class RiskManager:
         print(f"      - 最大回撤阈值: {self.max_drawdown_pct * 100}%")
         print(f"      - 价格偏离限制: {self.price_deviation_limit * 100}%")
 
+    def check(
+        self, decision: Dict[str, Any], account_state: Dict[str, Any]
+    ) -> Tuple[Dict[str, Any], bool, Optional[str]]:
+        """
+        统一风控入口：实盘和回测共用。
+        Args:
+            decision: 策略决策
+            account_state: 账户状态，如 {"balance": float, "position": float, "current_price": float, "max_position_pct": float(可选)}
+        Returns:
+            (final_decision, passed, rejection_reason)
+        """
+        balance = account_state.get("balance", 10000.0)
+        current_price = account_state.get("current_price", decision.get("price", 0))
+        max_pct = account_state.get("max_position_pct", self.max_position_pct)
+
+        final = decision.copy()
+        passed = True
+        rejection = None
+
+        if final.get("action") == "HOLD":
+            return final, True, None
+
+        price = final.get("price", 0) or current_price
+        quantity = final.get("quantity", 0)
+        if price > 0 and quantity > 0:
+            est_amount = price * quantity
+            max_allowed = balance * max_pct
+            if est_amount > max_allowed:
+                rejection = f"持仓超限: {est_amount:.2f} > {max_allowed:.2f}"
+                passed = False
+                final["action"] = "HOLD"
+                final["reason"] = f"风控拒绝: {rejection}"
+
+        if passed and current_price and price > 0:
+            dev = abs(price - current_price) / current_price
+            if dev > self.price_deviation_limit:
+                rejection = f"价格偏离: {dev*100:.2f}%"
+                passed = False
+                final["action"] = "HOLD"
+                final["reason"] = f"风控拒绝: {rejection}"
+
+        final["risk_checked"] = True
+        return final, passed, rejection
+
     def check_risk(self, decision: Dict[str, Any], current_market_data: Optional[Dict[str, Any]], 
                    account_balance: float = 10000.0) -> Tuple[Dict[str, Any], bool]:
         """
