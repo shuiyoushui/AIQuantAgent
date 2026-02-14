@@ -396,5 +396,5 @@ python run_backtest.py --mode returns --start 2024-01-01 --end 2024-12-31
 5. **Gemini 直接接入**：Google AI Studio 的 Key（`AIzaSy...`）不能直接用于 OpenAI 客户端，需通过 OpenRouter 等 OpenAI 兼容代理。
 
 ---
-##许可证信息
+## 许可证信息
 MIT License
