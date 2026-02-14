@@ -397,6 +397,3 @@ python run_backtest.py --mode returns --start 2024-01-01 --end 2024-12-31
 
 ---
 
-## 许可证
-
-[添加许可证信息]
