@@ -385,6 +385,8 @@ python run_backtest.py --mode returns --start 2024-01-01 --end 2024-12-31
 - **Python**：3.10+
 - **依赖**：见 `requirements.txt`（pandas、numpy、ccxt、yfinance、openai、pyyaml 等）
 
+##运行预览
+![运行预览](https://github.com/shuiyoushui/AIQuantAgent/blob/main/preview.png)
 ---
 
 ## 注意事项
