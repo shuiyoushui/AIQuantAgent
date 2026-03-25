@@ -13,7 +13,7 @@ AI 驱动的量化交易系统：**多智能体架构**，支持舆情/技术/�
 <details>
 <summary>微信群二维码（点击展开）</summary>
 
-![微信群二维码](./docs/wechat-qr.png)
+![微信群二维码](./wechat-qr.png)
 
 </details>
 ---
