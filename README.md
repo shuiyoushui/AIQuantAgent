@@ -2,6 +2,20 @@
 
 AI 驱动的量化交易系统：**多智能体架构**，支持舆情/技术/基本面因子、LLM 驱动决策、风控中台与事件驱动回测。默认模拟运行，不进行实盘交易。
 
+<!-- Shields 徽章 -->
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg?style=flat-square&logo=python)](https://www.python.org/)
+[![GitHub stars](https://img.shields.io/github/stars/shuiyoushui/AIQuantAgent?style=social)](https://github.com/shuiyoushui/AIQuantAgent/stargazers)
+[![GitHub forks](https://img.shields.io/github/forks/shuiyoushui/AIQuantAgent?style=social)](https://github.com/shuiyoushui/AIQuantAgent/network/members)
+[![GitHub issues](https://img.shields.io/github/issues/shuiyoushui/AIQuantAgent?style=flat-square)](https://github.com/shuiyoushui/AIQuantAgent/issues)
+
+
+<!-- 群二维码 -->
+<details>
+<summary>微信群二维码（点击展开）</summary>
+
+![微信群二维码](./docs/wechat-qr.png)
+
+</details>
 ---
 
 ## 目录
